@@ -15,6 +15,7 @@ serde_json.workspace = true
 storage = { version = "0.1.0", path = "../storage" }
 terminal-service = { version = "0.1.0", path = "../terminal-service" }
 thiserror.workspace = true
+thread-service = { version = "0.1.0", path = "../thread-service" }
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

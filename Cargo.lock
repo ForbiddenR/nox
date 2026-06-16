@@ -639,6 +639,7 @@ dependencies = [
  "storage",
  "terminal-service",
  "thiserror 2.0.18",
+ "thread-service",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -872,6 +873,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "thread-service"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "models",
+ "rusqlite",
+ "storage",
+ "thiserror 2.0.18",
+ "uuid",
 ]
 
 [[package]]

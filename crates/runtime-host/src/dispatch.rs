@@ -49,6 +49,10 @@ pub fn handle(ctx: &Context, req: Request) -> Outcome {
         }
         "open_project" => Outcome::Reply(open_project(ctx, id, &req.params)),
         "list_recent_projects" => Outcome::Reply(list_recent_projects(ctx, id)),
+        "create_thread" => Outcome::Reply(create_thread(ctx, id, &req.params)),
+        "list_threads" => Outcome::Reply(list_threads(ctx, id, &req.params)),
+        "rename_thread" => Outcome::Reply(rename_thread(ctx, id, &req.params)),
+        "archive_thread" => Outcome::Reply(archive_thread(ctx, id, &req.params)),
         other => {
             tracing::warn!(method = %other, "method not found");
             Outcome::Reply(Response::error(
@@ -106,6 +110,87 @@ fn list_recent_projects(ctx: &Context, id: Value) -> Response {
             json!({ "projects": projects }),
         ),
         Err(e) => Response::error(id, -32000, format!("failed to list projects: {e}")),
+    }
+}
+
+/// `create_thread({ project_id, title? })` → `{ thread }`.
+fn create_thread(ctx: &Context, id: Value, params: &Value) -> Response {
+    let project_id_str = match params.get("project_id").and_then(Value::as_str) {
+        Some(s) => s,
+        None => return Response::error(id, INVALID_PARAMS, "missing required param: project_id"),
+    };
+
+    let project_id = match models::Uuid::parse_str(project_id_str) {
+        Ok(id) => id,
+        Err(_) => return Response::error(id, INVALID_PARAMS, "invalid project_id format"),
+    };
+
+    let title = params.get("title").and_then(Value::as_str).map(String::from);
+
+    match thread_service::create_thread(project_id, title, &ctx.db.threads()) {
+        Ok(thread) => Response::success(id, serde_json::to_value(thread).unwrap()),
+        Err(e) => Response::error(id, -32000, format!("failed to create thread: {e}")),
+    }
+}
+
+/// `list_threads({ project_id, include_archived? })` → `{ threads: [...] }`.
+fn list_threads(ctx: &Context, id: Value, params: &Value) -> Response {
+    let project_id_str = match params.get("project_id").and_then(Value::as_str) {
+        Some(s) => s,
+        None => return Response::error(id, INVALID_PARAMS, "missing required param: project_id"),
+    };
+
+    let project_id = match models::Uuid::parse_str(project_id_str) {
+        Ok(id) => id,
+        Err(_) => return Response::error(id, INVALID_PARAMS, "invalid project_id format"),
+    };
+
+    let include_archived = params.get("include_archived").and_then(Value::as_bool).unwrap_or(false);
+
+    match thread_service::list_threads(project_id, include_archived, &ctx.db.threads()) {
+        Ok(threads) => Response::success(id, json!({ "threads": threads })),
+        Err(e) => Response::error(id, -32000, format!("failed to list threads: {e}")),
+    }
+}
+
+/// `rename_thread({ thread_id, title })` → `{ thread }`.
+fn rename_thread(ctx: &Context, id: Value, params: &Value) -> Response {
+    let thread_id_str = match params.get("thread_id").and_then(Value::as_str) {
+        Some(s) => s,
+        None => return Response::error(id, INVALID_PARAMS, "missing required param: thread_id"),
+    };
+
+    let thread_id = match models::Uuid::parse_str(thread_id_str) {
+        Ok(id) => id,
+        Err(_) => return Response::error(id, INVALID_PARAMS, "invalid thread_id format"),
+    };
+
+    let title = match params.get("title").and_then(Value::as_str) {
+        Some(t) => t.to_string(),
+        None => return Response::error(id, INVALID_PARAMS, "missing required param: title"),
+    };
+
+    match thread_service::rename_thread(thread_id, title, &ctx.db.threads()) {
+        Ok(thread) => Response::success(id, serde_json::to_value(thread).unwrap()),
+        Err(e) => Response::error(id, -32000, format!("failed to rename thread: {e}")),
+    }
+}
+
+/// `archive_thread({ thread_id })` → `{ thread }`.
+fn archive_thread(ctx: &Context, id: Value, params: &Value) -> Response {
+    let thread_id_str = match params.get("thread_id").and_then(Value::as_str) {
+        Some(s) => s,
+        None => return Response::error(id, INVALID_PARAMS, "missing required param: thread_id"),
+    };
+
+    let thread_id = match models::Uuid::parse_str(thread_id_str) {
+        Ok(id) => id,
+        Err(_) => return Response::error(id, INVALID_PARAMS, "invalid thread_id format"),
+    };
+
+    match thread_service::archive_thread(thread_id, &ctx.db.threads()) {
+        Ok(thread) => Response::success(id, serde_json::to_value(thread).unwrap()),
+        Err(e) => Response::error(id, -32000, format!("failed to archive thread: {e}")),
     }
 }
 

@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useProjectStore } from '../../store/project'
 import { useLayoutStore } from '../../store/layout'
 import { useOpenProject } from '../../features/projects/useOpenProject'
+import ThreadList from './ThreadList'
 import type { Project } from '../../lib/types'
 
 export default function Sidebar() {
@@ -77,6 +78,9 @@ export default function Sidebar() {
           {openProject.isPending ? 'Opening...' : 'Open Project'}
         </button>
       </div>
+
+      {/* Thread list (only show when project is selected) */}
+      {currentProject && <ThreadList />}
 
       {/* Recent projects list */}
       <div className="flex-1 overflow-y-auto p-2">

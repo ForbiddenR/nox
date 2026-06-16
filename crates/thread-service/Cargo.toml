@@ -1,0 +1,12 @@
+[package]
+name = "thread-service"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+chrono.workspace = true
+models = { version = "0.1.0", path = "../models" }
+rusqlite.workspace = true
+storage = { version = "0.1.0", path = "../storage" }
+thiserror.workspace = true
+uuid.workspace = true
