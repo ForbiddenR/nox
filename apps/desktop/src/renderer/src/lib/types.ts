@@ -31,18 +31,3 @@ export interface RpcError {
   message: string
   data?: unknown
 }
-
-declare global {
-  interface Window {
-    api: {
-      invoke: (method: string, params?: unknown) => Promise<unknown>
-      subscribe: (
-        method: string,
-        callback: (params: unknown) => void,
-      ) => () => void
-      dialog: {
-        openFolder: () => Promise<string | null>
-      }
-    }
-  }
-}
