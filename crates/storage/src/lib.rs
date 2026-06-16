@@ -7,6 +7,7 @@
 mod migrations;
 mod projects;
 mod threads;
+mod terminal_sessions;
 
 use std::path::{Path, PathBuf};
 
@@ -14,6 +15,7 @@ use rusqlite::Connection;
 
 pub use projects::ProjectStore;
 pub use threads::ThreadStore;
+pub use terminal_sessions::TerminalSessionStore;
 
 /// The central database handle. Owns the SQLite connection and exposes
 /// type-safe stores for each domain.

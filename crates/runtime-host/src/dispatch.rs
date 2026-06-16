@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 use storage::Database;
 
 use crate::rpc::{METHOD_NOT_FOUND, PROTOCOL_VERSION, Request, Response, INVALID_PARAMS};
+use crate::terminal::{TerminalManager, NotificationSender};
 
 const RUNTIME_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -24,11 +25,17 @@ pub enum Outcome {
 /// The dispatch context that holds the database and service state.
 pub struct Context {
     db: Database,
+    terminal_manager: TerminalManager,
+    notification_sender: NotificationSender,
 }
 
 impl Context {
-    pub fn new(db: Database) -> Self {
-        Self { db }
+    pub fn new(db: Database, notification_sender: NotificationSender) -> Self {
+        Self {
+            db,
+            terminal_manager: TerminalManager::new(),
+            notification_sender,
+        }
     }
 }
 
@@ -53,6 +60,10 @@ pub fn handle(ctx: &Context, req: Request) -> Outcome {
         "list_threads" => Outcome::Reply(list_threads(ctx, id, &req.params)),
         "rename_thread" => Outcome::Reply(rename_thread(ctx, id, &req.params)),
         "archive_thread" => Outcome::Reply(archive_thread(ctx, id, &req.params)),
+        "create_terminal" => Outcome::Reply(create_terminal(ctx, id, &req.params)),
+        "send_terminal_input" => Outcome::Reply(send_terminal_input(ctx, id, &req.params)),
+        "resize_terminal" => Outcome::Reply(resize_terminal(ctx, id, &req.params)),
+        "close_terminal" => Outcome::Reply(close_terminal(ctx, id, &req.params)),
         other => {
             tracing::warn!(method = %other, "method not found");
             Outcome::Reply(Response::error(
@@ -194,6 +205,136 @@ fn archive_thread(ctx: &Context, id: Value, params: &Value) -> Response {
     }
 }
 
+/// `create_terminal({ project_id, worktree_id?, cwd? })` → `{ session }`.
+fn create_terminal(ctx: &Context, id: Value, params: &Value) -> Response {
+    let project_id_str = match params.get("project_id").and_then(Value::as_str) {
+        Some(s) => s,
+        None => return Response::error(id, INVALID_PARAMS, "missing required param: project_id"),
+    };
+
+    let project_id = match models::Uuid::parse_str(project_id_str) {
+        Ok(id) => id,
+        Err(_) => return Response::error(id, INVALID_PARAMS, "invalid project_id format"),
+    };
+
+    let worktree_id = params
+        .get("worktree_id")
+        .and_then(Value::as_str)
+        .and_then(|s| models::Uuid::parse_str(s).ok());
+
+    // Default to project path if no cwd specified
+    let cwd = match params.get("cwd").and_then(Value::as_str) {
+        Some(path) => path.to_string(),
+        None => {
+            // Look up project to get its path
+            match ctx.db.projects().get(project_id) {
+                Ok(Some(project)) => project.path,
+                Ok(None) => return Response::error(id, -32000, "project not found"),
+                Err(e) => return Response::error(id, -32000, format!("failed to get project: {e}")),
+            }
+        }
+    };
+
+    let session = models::TerminalSession {
+        id: models::Uuid::new_v4(),
+        project_id,
+        worktree_id,
+        cwd: cwd.clone(),
+        exit_code: None,
+        created_at: chrono::Utc::now(),
+        closed_at: None,
+    };
+
+    // Persist to DB
+    if let Err(e) = ctx.db.terminal_sessions().insert(&session) {
+        return Response::error(id, -32000, format!("failed to persist session: {e}"));
+    }
+
+    // Create PTY session
+    match ctx.terminal_manager.create_terminal(session.clone(), ctx.notification_sender.clone()) {
+        Ok(_) => Response::success(id, serde_json::to_value(session).unwrap()),
+        Err(e) => Response::error(id, -32000, format!("failed to create terminal: {e}")),
+    }
+}
+
+/// `send_terminal_input({ session_id, data })` → `{ ok: true }`.
+fn send_terminal_input(ctx: &Context, id: Value, params: &Value) -> Response {
+    let session_id_str = match params.get("session_id").and_then(Value::as_str) {
+        Some(s) => s,
+        None => return Response::error(id, INVALID_PARAMS, "missing required param: session_id"),
+    };
+
+    let session_id = match models::Uuid::parse_str(session_id_str) {
+        Ok(id) => id,
+        Err(_) => return Response::error(id, INVALID_PARAMS, "invalid session_id format"),
+    };
+
+    let data = match params.get("data").and_then(Value::as_str) {
+        Some(d) => d,
+        None => return Response::error(id, INVALID_PARAMS, "missing required param: data"),
+    };
+
+    match ctx.terminal_manager.send_input(session_id, data) {
+        Ok(_) => Response::success(id, json!({ "ok": true })),
+        Err(e) => Response::error(id, -32000, format!("failed to send input: {e}")),
+    }
+}
+
+/// `resize_terminal({ session_id, rows, cols })` → `{ ok: true }`.
+fn resize_terminal(ctx: &Context, id: Value, params: &Value) -> Response {
+    let session_id_str = match params.get("session_id").and_then(Value::as_str) {
+        Some(s) => s,
+        None => return Response::error(id, INVALID_PARAMS, "missing required param: session_id"),
+    };
+
+    let session_id = match models::Uuid::parse_str(session_id_str) {
+        Ok(id) => id,
+        Err(_) => return Response::error(id, INVALID_PARAMS, "invalid session_id format"),
+    };
+
+    let rows = match params.get("rows").and_then(Value::as_u64) {
+        Some(r) => r as u16,
+        None => return Response::error(id, INVALID_PARAMS, "missing required param: rows"),
+    };
+
+    let cols = match params.get("cols").and_then(Value::as_u64) {
+        Some(c) => c as u16,
+        None => return Response::error(id, INVALID_PARAMS, "missing required param: cols"),
+    };
+
+    match ctx.terminal_manager.resize(session_id, rows, cols) {
+        Ok(_) => Response::success(id, json!({ "ok": true })),
+        Err(e) => Response::error(id, -32000, format!("failed to resize terminal: {e}")),
+    }
+}
+
+/// `close_terminal({ session_id })` → `{ ok: true }`.
+fn close_terminal(ctx: &Context, id: Value, params: &Value) -> Response {
+    let session_id_str = match params.get("session_id").and_then(Value::as_str) {
+        Some(s) => s,
+        None => return Response::error(id, INVALID_PARAMS, "missing required param: session_id"),
+    };
+
+    let session_id = match models::Uuid::parse_str(session_id_str) {
+        Ok(id) => id,
+        Err(_) => return Response::error(id, INVALID_PARAMS, "invalid session_id format"),
+    };
+
+    // Close PTY
+    if let Err(e) = ctx.terminal_manager.close(session_id) {
+        return Response::error(id, -32000, format!("failed to close terminal: {e}"));
+    }
+
+    // Update DB
+    if let Ok(Some(mut session)) = ctx.db.terminal_sessions().get(session_id) {
+        session.closed_at = Some(chrono::Utc::now());
+        let _ = ctx.db.terminal_sessions().update(&session);
+    }
+
+    Response::success(id, json!({ "ok": true }))
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -204,7 +345,9 @@ mod tests {
     }
 
     fn test_ctx() -> Context {
-        Context::new(storage::Database::in_memory().unwrap())
+        use std::sync::Arc;
+        let noop_sender: NotificationSender = Arc::new(|_method, _params| {});
+        Context::new(storage::Database::in_memory().unwrap(), noop_sender)
     }
 
     #[test]

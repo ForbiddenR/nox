@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 anyhow.workspace = true
+chrono.workspace = true
 event-bus = { version = "0.1.0", path = "../event-bus" }
 git-service = { version = "0.1.0", path = "../git-service" }
 models = { version = "0.1.0", path = "../models" }

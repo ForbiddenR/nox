@@ -6,18 +6,21 @@
 
 mod dispatch;
 mod rpc;
+mod terminal;
 
 use std::io::{self, BufReader, Write};
+use std::sync::Arc;
 
 use dispatch::{Context, Outcome};
 use rpc::{FrameError, PARSE_ERROR, Request, Response};
 use serde_json::Value;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     init_tracing();
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "runtime-host starting");
 
-    let code = run();
+    let code = run().await;
     tracing::info!(code, "runtime-host exiting");
     std::process::exit(code);
 }
@@ -33,8 +36,8 @@ fn init_tracing() {
         .init();
 }
 
-/// The blocking read/dispatch/write loop. Returns the process exit code.
-fn run() -> i32 {
+/// The async read/dispatch/write loop. Returns the process exit code.
+async fn run() -> i32 {
     // Open the database.
     let db_path = match storage::default_db_path() {
         Ok(path) => path,
@@ -51,12 +54,26 @@ fn run() -> i32 {
             return 1;
         }
     };
-    let ctx = Context::new(db);
+
+    // Create notification sender that writes to stdout
+    let stdout_handle = Arc::new(tokio::sync::Mutex::new(io::stdout()));
+    let notification_sender: terminal::NotificationSender = Arc::new({
+        let stdout = stdout_handle.clone();
+        move |method: String, params: serde_json::Value| {
+            let notification = serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": method,
+                "params": params,
+            });
+            let mut writer = stdout.blocking_lock();
+            let _ = rpc::write_message(&mut *writer, &notification);
+        }
+    });
+
+    let ctx = Context::new(db, notification_sender);
 
     let stdin = io::stdin();
     let mut reader = BufReader::new(stdin.lock());
-    let stdout = io::stdout();
-    let mut writer = stdout.lock();
 
     loop {
         let body = match rpc::read_message(&mut reader) {
@@ -77,7 +94,8 @@ fn run() -> i32 {
                 tracing::error!(error = %e, "failed to parse request");
                 // We couldn't read an id, so reply with null per JSON-RPC.
                 let resp = Response::error(Value::Null, PARSE_ERROR, format!("parse error: {e}"));
-                if let Err(e) = rpc::write_message(&mut writer, &resp) {
+                let mut writer = stdout_handle.blocking_lock();
+                if let Err(e) = rpc::write_message(&mut *writer, &resp) {
                     tracing::error!(error = %e, "failed to write parse error");
                     return 1;
                 }
@@ -87,14 +105,16 @@ fn run() -> i32 {
 
         match dispatch::handle(&ctx, req) {
             Outcome::Reply(resp) => {
-                if let Err(e) = rpc::write_message(&mut writer, &resp) {
+                let mut writer = stdout_handle.blocking_lock();
+                if let Err(e) = rpc::write_message(&mut *writer, &resp) {
                     tracing::error!(error = %e, "failed to write response");
                     return 1;
                 }
             }
             Outcome::Silent => {}
             Outcome::Shutdown(resp) => {
-                let _ = rpc::write_message(&mut writer, &resp);
+                let mut writer = stdout_handle.blocking_lock();
+                let _ = rpc::write_message(&mut *writer, &resp);
                 let _ = writer.flush();
                 return 0;
             }
