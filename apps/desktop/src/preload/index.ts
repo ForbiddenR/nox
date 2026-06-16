@@ -11,6 +11,7 @@ const api = {
   dialog: {
     openFolder: () => ipcRenderer.invoke('dialog:openFolder') as Promise<string | null>,
   },
+  getVersion: () => ipcRenderer.invoke('app:getVersion') as Promise<string>,
 }
 
 contextBridge.exposeInMainWorld('api', api)

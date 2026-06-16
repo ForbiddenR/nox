@@ -29,6 +29,12 @@ export default function Sidebar() {
 
   const projects = projectsData?.projects || []
 
+  const { data: appVersion } = useQuery({
+    queryKey: ['app-version'],
+    queryFn: () => window.api.getVersion(),
+    staleTime: Infinity,
+  })
+
   const handleOpenProject = async () => {
     try {
       // Open native folder picker
@@ -134,7 +140,7 @@ export default function Sidebar() {
 
       {/* Footer */}
       <div className="border-t border-neutral-800 px-4 py-2 text-xs text-neutral-500">
-        Cox v0.1.0
+        Cox{appVersion ? ` v${appVersion}` : ''}
       </div>
     </div>
   )

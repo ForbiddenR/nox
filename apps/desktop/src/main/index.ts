@@ -107,6 +107,9 @@ ipcMain.handle('rpc', async (_event, method: string, params?: unknown) => {
   }
 })
 
+// App version, for display in the UI.
+ipcMain.handle('app:getVersion', () => app.getVersion())
+
 // Native folder picker: returns the selected directory path or null if cancelled.
 ipcMain.handle('dialog:openFolder', async (event) => {
   const win = BrowserWindow.fromWebContents(event.sender)
