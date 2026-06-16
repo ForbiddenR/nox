@@ -1,0 +1,20 @@
+[package]
+name = "runtime-host"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow.workspace = true
+event-bus = { version = "0.1.0", path = "../event-bus" }
+git-service = { version = "0.1.0", path = "../git-service" }
+models = { version = "0.1.0", path = "../models" }
+project-service = { version = "0.1.0", path = "../project-service" }
+run-service = { version = "0.1.0", path = "../run-service" }
+serde.workspace = true
+serde_json.workspace = true
+storage = { version = "0.1.0", path = "../storage" }
+terminal-service = { version = "0.1.0", path = "../terminal-service" }
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

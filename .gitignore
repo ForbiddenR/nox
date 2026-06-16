@@ -1,0 +1,13 @@
+.claude/
+CLAUDE.md
+*/.vscode
+
+# Rust
+/target
+
+# Node / Electron
+node_modules/
+apps/desktop/out
+apps/desktop/dist
+apps/desktop/release
+v1*.md

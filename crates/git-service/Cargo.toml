@@ -1,0 +1,11 @@
+[package]
+name = "git-service"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow.workspace = true
+models = { version = "0.1.0", path = "../models" }
+serde.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
