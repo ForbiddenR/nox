@@ -14,3 +14,4 @@ apps/desktop/release
 apps/desktop/resources/runtime-host*
 v1*.md
 CI_FIXES.md
+DEVELOPMENT.md
