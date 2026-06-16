@@ -60,6 +60,9 @@ pub fn handle(ctx: &Context, req: Request) -> Outcome {
         "list_threads" => Outcome::Reply(list_threads(ctx, id, &req.params)),
         "rename_thread" => Outcome::Reply(rename_thread(ctx, id, &req.params)),
         "archive_thread" => Outcome::Reply(archive_thread(ctx, id, &req.params)),
+        "start_run" => Outcome::Reply(start_run(ctx, id, &req.params)),
+        "list_runs" => Outcome::Reply(list_runs(ctx, id, &req.params)),
+        "list_run_events" => Outcome::Reply(list_run_events(ctx, id, &req.params)),
         "create_terminal" => Outcome::Reply(create_terminal(ctx, id, &req.params)),
         "send_terminal_input" => Outcome::Reply(send_terminal_input(ctx, id, &req.params)),
         "resize_terminal" => Outcome::Reply(resize_terminal(ctx, id, &req.params)),
@@ -332,6 +335,66 @@ fn close_terminal(ctx: &Context, id: Value, params: &Value) -> Response {
     }
 
     Response::success(id, json!({ "ok": true }))
+}
+
+/// `start_run({ thread_id, prompt })` → `{ run_id }`.
+fn start_run(ctx: &Context, id: Value, params: &Value) -> Response {
+    let thread_id_str = match params.get("thread_id").and_then(Value::as_str) {
+        Some(s) => s,
+        None => return Response::error(id, INVALID_PARAMS, "missing required param: thread_id"),
+    };
+
+    let thread_id = match models::Uuid::parse_str(thread_id_str) {
+        Ok(id) => id,
+        Err(_) => return Response::error(id, INVALID_PARAMS, "invalid thread_id format"),
+    };
+
+    let prompt = match params.get("prompt").and_then(Value::as_str) {
+        Some(p) => p.to_string(),
+        None => return Response::error(id, INVALID_PARAMS, "missing required param: prompt"),
+    };
+
+    // Start the run (spawns background task)
+    match run_service::start_run(thread_id, prompt, &ctx.db, ctx.notification_sender.clone()) {
+        Ok(run_id) => Response::success(id, json!({ "run_id": run_id })),
+        Err(e) => Response::error(id, -32000, format!("failed to start run: {e}")),
+    }
+}
+
+/// `list_runs({ thread_id })` → `{ runs: [...] }`.
+fn list_runs(ctx: &Context, id: Value, params: &Value) -> Response {
+    let thread_id_str = match params.get("thread_id").and_then(Value::as_str) {
+        Some(s) => s,
+        None => return Response::error(id, INVALID_PARAMS, "missing required param: thread_id"),
+    };
+
+    let thread_id = match models::Uuid::parse_str(thread_id_str) {
+        Ok(id) => id,
+        Err(_) => return Response::error(id, INVALID_PARAMS, "invalid thread_id format"),
+    };
+
+    match ctx.db.list_runs(thread_id) {
+        Ok(runs) => Response::success(id, json!({ "runs": runs })),
+        Err(e) => Response::error(id, -32000, format!("failed to list runs: {e}")),
+    }
+}
+
+/// `list_run_events({ run_id })` → `{ events: [...] }`.
+fn list_run_events(ctx: &Context, id: Value, params: &Value) -> Response {
+    let run_id_str = match params.get("run_id").and_then(Value::as_str) {
+        Some(s) => s,
+        None => return Response::error(id, INVALID_PARAMS, "missing required param: run_id"),
+    };
+
+    let run_id = match models::Uuid::parse_str(run_id_str) {
+        Ok(id) => id,
+        Err(_) => return Response::error(id, INVALID_PARAMS, "invalid run_id format"),
+    };
+
+    match ctx.db.list_run_events(run_id) {
+        Ok(events) => Response::success(id, json!({ "events": events })),
+        Err(e) => Response::error(id, -32000, format!("failed to list events: {e}")),
+    }
 }
 
 

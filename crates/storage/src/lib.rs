@@ -6,6 +6,7 @@
 
 mod migrations;
 mod projects;
+mod runs;
 mod threads;
 mod terminal_sessions;
 
@@ -21,15 +22,17 @@ pub use terminal_sessions::TerminalSessionStore;
 /// type-safe stores for each domain.
 pub struct Database {
     conn: Connection,
+    path: Option<PathBuf>,
 }
 
 impl Database {
     /// Open or create the database at the given path, applying all migrations.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, rusqlite::Error> {
-        let conn = Connection::open(path)?;
+        let path_buf = path.as_ref().to_path_buf();
+        let conn = Connection::open(&path_buf)?;
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         migrations::migrate(&conn)?;
-        Ok(Self { conn })
+        Ok(Self { conn, path: Some(path_buf) })
     }
 
     /// Open an in-memory database (for tests).
@@ -37,7 +40,12 @@ impl Database {
         let conn = Connection::open_in_memory()?;
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         migrations::migrate(&conn)?;
-        Ok(Self { conn })
+        Ok(Self { conn, path: None })
+    }
+
+    /// Get the database file path (None for in-memory databases).
+    pub fn path(&self) -> Option<&Path> {
+        self.path.as_deref()
     }
 
     pub fn projects(&self) -> ProjectStore<'_> {

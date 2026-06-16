@@ -1,11 +1,24 @@
 import { useProjectStore } from '../../store/project'
 import { useThreadStore } from '../../store/thread'
 import { useCreateThread } from '../../features/threads/useThreads'
+import { useRuns, useRunEvents, useStartRun } from '../../features/runs/useRuns'
+import Timeline from '../timeline/Timeline'
+import PromptInput from '../timeline/PromptInput'
 
 export default function CenterPanel() {
   const { currentProject } = useProjectStore()
   const { currentThread, setCurrentThread } = useThreadStore()
   const createThread = useCreateThread()
+  const startRun = useStartRun()
+
+  // Load runs for the current thread
+  const { data: runsData } = useRuns(currentThread?.id)
+  const runs = runsData?.runs || []
+  const latestRun = runs[0] // Runs are sorted by created_at DESC
+
+  // Load events for the latest run
+  const { data: eventsData } = useRunEvents(latestRun?.id)
+  const events = eventsData?.events || []
 
   const handleCreateThread = async () => {
     if (!currentProject) return
@@ -19,6 +32,21 @@ export default function CenterPanel() {
       console.error('Failed to create thread:', err)
     }
   }
+
+  const handleSendPrompt = async (prompt: string) => {
+    if (!currentThread) return
+
+    try {
+      await startRun.mutateAsync({
+        threadId: currentThread.id,
+        prompt,
+      })
+    } catch (err) {
+      console.error('Failed to start run:', err)
+    }
+  }
+
+  const isRunning = latestRun?.state === 'running' || latestRun?.state === 'queued'
 
   if (!currentProject) {
     return (
@@ -76,14 +104,45 @@ export default function CenterPanel() {
                   {new Date(currentThread.created_at).toLocaleDateString()}
                 </span>
               </div>
-              <div className="rounded-lg border border-neutral-800 bg-neutral-900/50 p-6 text-center">
-                <h3 className="text-lg font-medium text-neutral-300">
-                  Thread timeline will appear here
-                </h3>
-                <p className="mt-2 text-sm text-neutral-500">
-                  Messages and agent interactions will be displayed in this area
-                </p>
-              </div>
+
+              {/* Timeline */}
+              {latestRun && events.length > 0 ? (
+                <div className="space-y-6">
+                  <div className="rounded-lg border border-neutral-800 bg-neutral-900/50 p-6">
+                    <div className="mb-4 flex items-center justify-between">
+                      <span className="text-sm text-neutral-400">Prompt:</span>
+                      <span
+                        className={`rounded-full px-2 py-1 text-xs ${
+                          latestRun.state === 'completed'
+                            ? 'bg-green-900/50 text-green-400'
+                            : latestRun.state === 'running'
+                              ? 'bg-blue-900/50 text-blue-400'
+                              : latestRun.state === 'failed'
+                                ? 'bg-red-900/50 text-red-400'
+                                : 'bg-neutral-800 text-neutral-400'
+                        }`}
+                      >
+                        {latestRun.state}
+                      </span>
+                    </div>
+                    <p className="mb-6 text-neutral-300">{latestRun.prompt}</p>
+                    <Timeline runId={latestRun.id} events={events} />
+                  </div>
+
+                  {/* Show older runs if any */}
+                  {runs.length > 1 && (
+                    <div className="text-center text-sm text-neutral-500">
+                      {runs.length - 1} older run{runs.length > 2 ? 's' : ''} in this thread
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="rounded-lg border border-neutral-800 bg-neutral-900/50 p-6 text-center">
+                  <p className="text-sm text-neutral-500">
+                    No messages yet. Send a prompt to start.
+                  </p>
+                </div>
+              )}
             </div>
           ) : (
             <div className="rounded-lg border border-neutral-800 bg-neutral-900/50 p-6 text-center">
@@ -104,6 +163,20 @@ export default function CenterPanel() {
           )}
         </div>
       </div>
+
+      {/* Prompt input (only show when thread is selected) */}
+      {currentThread && (
+        <div className="border-t border-neutral-800 bg-neutral-900/50 p-4">
+          <div className="mx-auto max-w-4xl">
+            <PromptInput onSubmit={handleSendPrompt} disabled={isRunning} />
+            {isRunning && (
+              <p className="mt-2 text-xs text-neutral-500">
+                Agent is working... Please wait for the current run to complete.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

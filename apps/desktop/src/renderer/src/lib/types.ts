@@ -31,3 +31,22 @@ export interface RpcError {
   message: string
   data?: unknown
 }
+
+export interface Run {
+  id: string
+  thread_id: string
+  prompt: string
+  state: 'queued' | 'running' | 'waiting_approval' | 'completed' | 'failed' | 'cancelled'
+  worktree_id: string | null
+  created_at: string
+  completed_at: string | null
+}
+
+export interface RunEvent {
+  id: string
+  run_id: string
+  sequence: number
+  event_type: string
+  payload: unknown
+  created_at: string
+}
