@@ -10,6 +10,7 @@ mod projects;
 mod runs;
 mod threads;
 mod terminal_sessions;
+mod worktrees;
 
 use std::path::{Path, PathBuf};
 
@@ -18,6 +19,12 @@ use rusqlite::Connection;
 pub use projects::ProjectStore;
 pub use threads::ThreadStore;
 pub use terminal_sessions::TerminalSessionStore;
+
+// Re-export worktree functions
+pub use worktrees::{
+    delete_worktree, get_worktree, insert_worktree, list_worktrees, set_active_worktree,
+    update_worktree_head,
+};
 
 /// The central database handle. Owns the SQLite connection and exposes
 /// type-safe stores for each domain.
@@ -55,6 +62,20 @@ impl Database {
 
     pub fn threads(&self) -> ThreadStore<'_> {
         ThreadStore::new(&self.conn)
+    }
+
+    /// Get a reference to the underlying connection for worktree operations.
+    pub(crate) fn conn(&self) -> &Connection {
+        &self.conn
+    }
+}
+
+// Implement Deref to allow direct connection access for module functions
+impl std::ops::Deref for Database {
+    type Target = Connection;
+
+    fn deref(&self) -> &Self::Target {
+        &self.conn
     }
 }
 

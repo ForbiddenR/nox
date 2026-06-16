@@ -7,6 +7,7 @@
 use serde_json::{Value, json};
 use storage::Database;
 use git_service::GitService;
+use worktree_service::WorktreeService;
 
 use crate::rpc::{METHOD_NOT_FOUND, PROTOCOL_VERSION, Request, Response, INVALID_PARAMS};
 use crate::terminal::{TerminalManager, NotificationSender};
@@ -28,15 +29,25 @@ pub struct Context {
     db: Database,
     terminal_manager: TerminalManager,
     git_service: GitService,
+    worktree_service: WorktreeService,
     notification_sender: NotificationSender,
 }
 
 impl Context {
     pub fn new(db: Database, notification_sender: NotificationSender) -> Self {
+        // Determine worktrees base path based on database location
+        let worktrees_base = if let Some(db_path) = db.path() {
+            db_path.parent().unwrap().join("worktrees")
+        } else {
+            // In-memory DB for tests - use temp directory
+            std::env::temp_dir().join("cox-worktrees")
+        };
+
         Self {
             db,
             terminal_manager: TerminalManager::new(),
             git_service: GitService::new(),
+            worktree_service: WorktreeService::new(worktrees_base),
             notification_sender,
         }
     }
@@ -75,6 +86,10 @@ pub fn handle(ctx: &Context, req: Request) -> Outcome {
         "send_terminal_input" => Outcome::Reply(send_terminal_input(ctx, id, &req.params)),
         "resize_terminal" => Outcome::Reply(resize_terminal(ctx, id, &req.params)),
         "close_terminal" => Outcome::Reply(close_terminal(ctx, id, &req.params)),
+        "list_worktrees" => Outcome::Reply(list_worktrees(ctx, id, &req.params)),
+        "create_worktree" => Outcome::Reply(create_worktree(ctx, id, &req.params)),
+        "switch_worktree" => Outcome::Reply(switch_worktree(ctx, id, &req.params)),
+        "remove_worktree" => Outcome::Reply(remove_worktree(ctx, id, &req.params)),
         other => {
             tracing::warn!(method = %other, "method not found");
             Outcome::Reply(Response::error(
@@ -547,6 +562,132 @@ fn list_artifacts(ctx: &Context, id: Value, params: &Value) -> Response {
         Ok(artifacts) => Response::success(id, json!({ "artifacts": artifacts })),
         Err(e) => Response::error(id, -32000, format!("failed to list artifacts: {e}")),
     }
+}
+
+/// `list_worktrees({ project_id })` → `{ worktrees: [...] }`.
+fn list_worktrees(ctx: &Context, id: Value, params: &Value) -> Response {
+    let project_id_str = match params.get("project_id").and_then(Value::as_str) {
+        Some(s) => s,
+        None => return Response::error(id, INVALID_PARAMS, "missing required param: project_id"),
+    };
+
+    let project_id = match models::Uuid::parse_str(project_id_str) {
+        Ok(id) => id,
+        Err(_) => return Response::error(id, INVALID_PARAMS, "invalid project_id format"),
+    };
+
+    match storage::list_worktrees(&ctx.db, project_id) {
+        Ok(worktrees) => Response::success(id, json!({ "worktrees": worktrees })),
+        Err(e) => Response::error(id, -32000, format!("failed to list worktrees: {e}")),
+    }
+}
+
+/// `create_worktree({ project_id, name, base_ref })` → `{ worktree }`.
+fn create_worktree(ctx: &Context, id: Value, params: &Value) -> Response {
+    let project_id_str = match params.get("project_id").and_then(Value::as_str) {
+        Some(s) => s,
+        None => return Response::error(id, INVALID_PARAMS, "missing required param: project_id"),
+    };
+
+    let project_id = match models::Uuid::parse_str(project_id_str) {
+        Ok(id) => id,
+        Err(_) => return Response::error(id, INVALID_PARAMS, "invalid project_id format"),
+    };
+
+    let name = match params.get("name").and_then(Value::as_str) {
+        Some(n) => n,
+        None => return Response::error(id, INVALID_PARAMS, "missing required param: name"),
+    };
+
+    let base_ref = match params.get("base_ref").and_then(Value::as_str) {
+        Some(r) => r,
+        None => "HEAD", // Default to HEAD
+    };
+
+    let project = match ctx.db.projects().get(project_id) {
+        Ok(Some(p)) => p,
+        Ok(None) => return Response::error(id, -32000, "project not found"),
+        Err(e) => return Response::error(id, -32000, format!("failed to get project: {e}")),
+    };
+
+    if !project.is_git_repo {
+        return Response::error(id, -32000, "project is not a git repository");
+    }
+
+    let worktree = match ctx.worktree_service.create_worktree(
+        &std::path::Path::new(&project.path),
+        project_id,
+        name,
+        base_ref,
+    ) {
+        Ok(wt) => wt,
+        Err(e) => return Response::error(id, -32000, format!("failed to create worktree: {e}")),
+    };
+
+    if let Err(e) = storage::insert_worktree(&ctx.db, &worktree) {
+        return Response::error(id, -32000, format!("failed to persist worktree: {e}"));
+    }
+
+    Response::success(id, json!({ "worktree": worktree }))
+}
+
+/// `switch_worktree({ worktree_id })` → `{ ok: true }`.
+fn switch_worktree(ctx: &Context, id: Value, params: &Value) -> Response {
+    let worktree_id_str = match params.get("worktree_id").and_then(Value::as_str) {
+        Some(s) => s,
+        None => return Response::error(id, INVALID_PARAMS, "missing required param: worktree_id"),
+    };
+
+    let worktree_id = match models::Uuid::parse_str(worktree_id_str) {
+        Ok(id) => id,
+        Err(_) => return Response::error(id, INVALID_PARAMS, "invalid worktree_id format"),
+    };
+
+    match storage::set_active_worktree(&ctx.db, worktree_id) {
+        Ok(_) => Response::success(id, json!({ "ok": true })),
+        Err(e) => Response::error(id, -32000, format!("failed to switch worktree: {e}")),
+    }
+}
+
+/// `remove_worktree({ worktree_id, force? })` → `{ ok: true }`.
+fn remove_worktree(ctx: &Context, id: Value, params: &Value) -> Response {
+    let worktree_id_str = match params.get("worktree_id").and_then(Value::as_str) {
+        Some(s) => s,
+        None => return Response::error(id, INVALID_PARAMS, "missing required param: worktree_id"),
+    };
+
+    let worktree_id = match models::Uuid::parse_str(worktree_id_str) {
+        Ok(id) => id,
+        Err(_) => return Response::error(id, INVALID_PARAMS, "invalid worktree_id format"),
+    };
+
+    let force = params.get("force").and_then(Value::as_bool).unwrap_or(false);
+
+    let worktree = match storage::get_worktree(&ctx.db, worktree_id) {
+        Ok(Some(wt)) => wt,
+        Ok(None) => return Response::error(id, -32000, "worktree not found"),
+        Err(e) => return Response::error(id, -32000, format!("failed to get worktree: {e}")),
+    };
+
+    let project = match ctx.db.projects().get(worktree.project_id) {
+        Ok(Some(p)) => p,
+        Ok(None) => return Response::error(id, -32000, "project not found"),
+        Err(e) => return Response::error(id, -32000, format!("failed to get project: {e}")),
+    };
+
+    if let Err(e) = ctx.worktree_service.remove_worktree(
+        &std::path::Path::new(&project.path),
+        &std::path::Path::new(&worktree.path),
+        force,
+    ) {
+        return Response::error(id, -32000, format!("failed to remove worktree: {e}"));
+    }
+
+    if let Err(e) = storage::delete_worktree(&ctx.db, worktree_id) {
+        return Response::error(id, -32000, format!("failed to delete worktree record: {e}"));
+    }
+
+    Response::success(id, json!({ "ok": true }))
 }
 
 

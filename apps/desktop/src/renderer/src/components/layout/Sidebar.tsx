@@ -14,8 +14,16 @@ export default function Sidebar() {
   const { data: projectsData } = useQuery({
     queryKey: ['recent-projects'],
     queryFn: async () => {
-      const result = await window.api.invoke('list_recent_projects')
-      return result as { projects: Project[] }
+      const response = await window.api.invoke('list_recent_projects')
+      const result = response as {
+        ok: boolean
+        result?: { projects: Project[] }
+        error?: string
+      }
+      if (!result.ok || !result.result) {
+        throw new Error(result.error || 'Failed to list recent projects')
+      }
+      return result.result
     },
   })
 

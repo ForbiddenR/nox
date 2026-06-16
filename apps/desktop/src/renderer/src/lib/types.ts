@@ -71,3 +71,14 @@ export interface Artifact {
   file_path: string
   created_at: string
 }
+
+export interface Worktree {
+  id: string
+  project_id: string
+  name: string
+  path: string
+  branch: string
+  head_sha: string
+  is_active: boolean
+  created_at: string
+}
