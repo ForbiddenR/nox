@@ -50,3 +50,24 @@ export interface RunEvent {
   payload: unknown
   created_at: string
 }
+
+export interface DiffSummary {
+  files_changed: number
+  insertions: number
+  deletions: number
+}
+
+export interface ChangedFile {
+  path: string
+  status: 'added' | 'modified' | 'deleted' | 'renamed'
+  insertions: number
+  deletions: number
+}
+
+export interface Artifact {
+  id: string
+  run_id: string
+  artifact_type: 'diff' | 'patch' | 'log' | 'summary'
+  file_path: string
+  created_at: string
+}

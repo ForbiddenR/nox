@@ -5,6 +5,7 @@
 //! blocking I/O is fine for local SQLite.
 
 mod migrations;
+mod artifacts;
 mod projects;
 mod runs;
 mod threads;

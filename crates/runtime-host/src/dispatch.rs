@@ -6,6 +6,7 @@
 
 use serde_json::{Value, json};
 use storage::Database;
+use git_service::GitService;
 
 use crate::rpc::{METHOD_NOT_FOUND, PROTOCOL_VERSION, Request, Response, INVALID_PARAMS};
 use crate::terminal::{TerminalManager, NotificationSender};
@@ -26,6 +27,7 @@ pub enum Outcome {
 pub struct Context {
     db: Database,
     terminal_manager: TerminalManager,
+    git_service: GitService,
     notification_sender: NotificationSender,
 }
 
@@ -34,6 +36,7 @@ impl Context {
         Self {
             db,
             terminal_manager: TerminalManager::new(),
+            git_service: GitService::new(),
             notification_sender,
         }
     }
@@ -63,6 +66,11 @@ pub fn handle(ctx: &Context, req: Request) -> Outcome {
         "start_run" => Outcome::Reply(start_run(ctx, id, &req.params)),
         "list_runs" => Outcome::Reply(list_runs(ctx, id, &req.params)),
         "list_run_events" => Outcome::Reply(list_run_events(ctx, id, &req.params)),
+        "get_diff" => Outcome::Reply(get_diff(ctx, id, &req.params)),
+        "list_changed_files" => Outcome::Reply(list_changed_files(ctx, id, &req.params)),
+        "apply_patch" => Outcome::Reply(apply_patch(ctx, id, &req.params)),
+        "reject_changes" => Outcome::Reply(reject_changes(ctx, id, &req.params)),
+        "list_artifacts" => Outcome::Reply(list_artifacts(ctx, id, &req.params)),
         "create_terminal" => Outcome::Reply(create_terminal(ctx, id, &req.params)),
         "send_terminal_input" => Outcome::Reply(send_terminal_input(ctx, id, &req.params)),
         "resize_terminal" => Outcome::Reply(resize_terminal(ctx, id, &req.params)),
@@ -394,6 +402,150 @@ fn list_run_events(ctx: &Context, id: Value, params: &Value) -> Response {
     match ctx.db.list_run_events(run_id) {
         Ok(events) => Response::success(id, json!({ "events": events })),
         Err(e) => Response::error(id, -32000, format!("failed to list events: {e}")),
+    }
+}
+
+/// `get_diff({ project_id })` → `{ diff, summary, files }`.
+fn get_diff(ctx: &Context, id: Value, params: &Value) -> Response {
+    let project_id_str = match params.get("project_id").and_then(Value::as_str) {
+        Some(s) => s,
+        None => return Response::error(id, INVALID_PARAMS, "missing required param: project_id"),
+    };
+
+    let project_id = match models::Uuid::parse_str(project_id_str) {
+        Ok(id) => id,
+        Err(_) => return Response::error(id, INVALID_PARAMS, "invalid project_id format"),
+    };
+
+    // Get project path
+    let project = match ctx.db.projects().get(project_id) {
+        Ok(Some(p)) => p,
+        Ok(None) => return Response::error(id, -32000, "project not found"),
+        Err(e) => return Response::error(id, -32000, format!("failed to get project: {e}")),
+    };
+
+    // Get diff
+    let diff = match ctx.git_service.get_working_tree_diff(&std::path::Path::new(&project.path)) {
+        Ok(d) => d,
+        Err(e) => return Response::error(id, -32000, format!("failed to get diff: {e}")),
+    };
+
+    // Get summary
+    let summary = match ctx.git_service.get_diff_summary(&std::path::Path::new(&project.path)) {
+        Ok(s) => s,
+        Err(e) => return Response::error(id, -32000, format!("failed to get summary: {e}")),
+    };
+
+    // Get changed files
+    let files = match ctx.git_service.list_changed_files(&std::path::Path::new(&project.path)) {
+        Ok(f) => f,
+        Err(e) => return Response::error(id, -32000, format!("failed to list files: {e}")),
+    };
+
+    Response::success(id, json!({
+        "diff": diff,
+        "summary": summary,
+        "files": files
+    }))
+}
+
+/// `list_changed_files({ project_id })` → `{ files: [...] }`.
+fn list_changed_files(ctx: &Context, id: Value, params: &Value) -> Response {
+    let project_id_str = match params.get("project_id").and_then(Value::as_str) {
+        Some(s) => s,
+        None => return Response::error(id, INVALID_PARAMS, "missing required param: project_id"),
+    };
+
+    let project_id = match models::Uuid::parse_str(project_id_str) {
+        Ok(id) => id,
+        Err(_) => return Response::error(id, INVALID_PARAMS, "invalid project_id format"),
+    };
+
+    let project = match ctx.db.projects().get(project_id) {
+        Ok(Some(p)) => p,
+        Ok(None) => return Response::error(id, -32000, "project not found"),
+        Err(e) => return Response::error(id, -32000, format!("failed to get project: {e}")),
+    };
+
+    match ctx.git_service.list_changed_files(&std::path::Path::new(&project.path)) {
+        Ok(files) => Response::success(id, json!({ "files": files })),
+        Err(e) => Response::error(id, -32000, format!("failed to list files: {e}")),
+    }
+}
+
+/// `apply_patch({ project_id, patch })` → `{ ok: true }`.
+fn apply_patch(ctx: &Context, id: Value, params: &Value) -> Response {
+    let project_id_str = match params.get("project_id").and_then(Value::as_str) {
+        Some(s) => s,
+        None => return Response::error(id, INVALID_PARAMS, "missing required param: project_id"),
+    };
+
+    let project_id = match models::Uuid::parse_str(project_id_str) {
+        Ok(id) => id,
+        Err(_) => return Response::error(id, INVALID_PARAMS, "invalid project_id format"),
+    };
+
+    let patch = match params.get("patch").and_then(Value::as_str) {
+        Some(p) => p,
+        None => return Response::error(id, INVALID_PARAMS, "missing required param: patch"),
+    };
+
+    let project = match ctx.db.projects().get(project_id) {
+        Ok(Some(p)) => p,
+        Ok(None) => return Response::error(id, -32000, "project not found"),
+        Err(e) => return Response::error(id, -32000, format!("failed to get project: {e}")),
+    };
+
+    match ctx.git_service.apply_patch(&std::path::Path::new(&project.path), patch) {
+        Ok(_) => Response::success(id, json!({ "ok": true })),
+        Err(e) => Response::error(id, -32000, format!("failed to apply patch: {e}")),
+    }
+}
+
+/// `reject_changes({ project_id })` → `{ ok: true }`.
+fn reject_changes(ctx: &Context, id: Value, params: &Value) -> Response {
+    let project_id_str = match params.get("project_id").and_then(Value::as_str) {
+        Some(s) => s,
+        None => return Response::error(id, INVALID_PARAMS, "missing required param: project_id"),
+    };
+
+    let project_id = match models::Uuid::parse_str(project_id_str) {
+        Ok(id) => id,
+        Err(_) => return Response::error(id, INVALID_PARAMS, "invalid project_id format"),
+    };
+
+    let project = match ctx.db.projects().get(project_id) {
+        Ok(Some(p)) => p,
+        Ok(None) => return Response::error(id, -32000, "project not found"),
+        Err(e) => return Response::error(id, -32000, format!("failed to get project: {e}")),
+    };
+
+    match ctx.git_service.reset_working_tree(&std::path::Path::new(&project.path)) {
+        Ok(_) => Response::success(id, json!({ "ok": true })),
+        Err(e) => Response::error(id, -32000, format!("failed to reset changes: {e}")),
+    }
+}
+
+/// `list_artifacts({ run_id, artifact_type? })` → `{ artifacts: [...] }`.
+fn list_artifacts(ctx: &Context, id: Value, params: &Value) -> Response {
+    let run_id_str = match params.get("run_id").and_then(Value::as_str) {
+        Some(s) => s,
+        None => return Response::error(id, INVALID_PARAMS, "missing required param: run_id"),
+    };
+
+    let run_id = match models::Uuid::parse_str(run_id_str) {
+        Ok(id) => id,
+        Err(_) => return Response::error(id, INVALID_PARAMS, "invalid run_id format"),
+    };
+
+    let artifact_type = params
+        .get("artifact_type")
+        .and_then(Value::as_str)
+        .and_then(|s| serde_json::from_str(&format!("\"{}\"", s)).ok());
+
+    match ctx.db.list_artifacts(run_id, artifact_type) {
+        Ok(artifacts) => Response::success(id, json!({ "artifacts": artifacts })),
+        Err(e) => Response::error(id, -32000, format!("failed to list artifacts: {e}")),
     }
 }
 
