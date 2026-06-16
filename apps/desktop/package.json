@@ -4,6 +4,10 @@
   "private": true,
   "description": "Local-first desktop coding agent (Electron UI + Rust sidecar)",
   "author": "cox",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ForbiddenR/nox.git"
+  },
   "main": "out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
