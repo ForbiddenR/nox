@@ -13,3 +13,4 @@ apps/desktop/release
 # Rust sidecar binary staged into the desktop app at build time
 apps/desktop/resources/runtime-host*
 v1*.md
+CI_FIXES.md

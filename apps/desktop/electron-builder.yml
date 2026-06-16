@@ -14,6 +14,9 @@ win:
   target:
     - nsis
   artifactName: ${productName}-${version}-${arch}.${ext}
+  # Icon should be placed at build/icon.ico (256x256 or larger, .ico format)
+  # Until an icon is added, the default Electron icon will be used.
+  icon: build/icon.ico
 nsis:
   oneClick: false
   perMachine: false
@@ -21,4 +24,4 @@ nsis:
 # owner/repo are auto-detected from the git remote in CI.
 publish:
   provider: github
-  releaseType: draft
+  releaseType: release
