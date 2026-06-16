@@ -9,7 +9,7 @@ mod rpc;
 mod terminal;
 
 use std::io::{self, BufReader, Write};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use dispatch::{Context, Outcome};
 use rpc::{FrameError, PARSE_ERROR, Request, Response};
@@ -55,8 +55,11 @@ async fn run() -> i32 {
         }
     };
 
-    // Create notification sender that writes to stdout
-    let stdout_handle = Arc::new(tokio::sync::Mutex::new(io::stdout()));
+    // Shared stdout writer. A std Mutex is correct here: the stdio loop is
+    // serial and lock hold-times are tiny, and unlike tokio's async
+    // `blocking_lock()` it can be taken both from this async task and from the
+    // PTY notification threads without panicking inside the runtime.
+    let stdout_handle = Arc::new(Mutex::new(io::stdout()));
     let notification_sender: terminal::NotificationSender = Arc::new({
         let stdout = stdout_handle.clone();
         move |method: String, params: serde_json::Value| {
@@ -65,7 +68,7 @@ async fn run() -> i32 {
                 "method": method,
                 "params": params,
             });
-            let mut writer = stdout.blocking_lock();
+            let mut writer = stdout.lock().unwrap_or_else(PoisonError::into_inner);
             let _ = rpc::write_message(&mut *writer, &notification);
         }
     });
@@ -94,7 +97,7 @@ async fn run() -> i32 {
                 tracing::error!(error = %e, "failed to parse request");
                 // We couldn't read an id, so reply with null per JSON-RPC.
                 let resp = Response::error(Value::Null, PARSE_ERROR, format!("parse error: {e}"));
-                let mut writer = stdout_handle.blocking_lock();
+                let mut writer = stdout_handle.lock().unwrap_or_else(PoisonError::into_inner);
                 if let Err(e) = rpc::write_message(&mut *writer, &resp) {
                     tracing::error!(error = %e, "failed to write parse error");
                     return 1;
@@ -105,7 +108,7 @@ async fn run() -> i32 {
 
         match dispatch::handle(&ctx, req) {
             Outcome::Reply(resp) => {
-                let mut writer = stdout_handle.blocking_lock();
+                let mut writer = stdout_handle.lock().unwrap_or_else(PoisonError::into_inner);
                 if let Err(e) = rpc::write_message(&mut *writer, &resp) {
                     tracing::error!(error = %e, "failed to write response");
                     return 1;
@@ -113,7 +116,7 @@ async fn run() -> i32 {
             }
             Outcome::Silent => {}
             Outcome::Shutdown(resp) => {
-                let mut writer = stdout_handle.blocking_lock();
+                let mut writer = stdout_handle.lock().unwrap_or_else(PoisonError::into_inner);
                 let _ = rpc::write_message(&mut *writer, &resp);
                 let _ = writer.flush();
                 return 0;
