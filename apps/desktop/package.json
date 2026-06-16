@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Local-first desktop coding agent (Electron UI + Rust sidecar)",
-  "type": "module",
+  "author": "cox",
   "main": "out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",

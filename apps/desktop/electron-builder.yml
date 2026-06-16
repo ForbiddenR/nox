@@ -1,0 +1,24 @@
+appId: com.cox.desktop
+productName: Cox
+directories:
+  output: dist
+  buildResources: build
+files:
+  - out/**
+  - package.json
+# The Rust sidecar binary is staged here by CI before packaging.
+extraResources:
+  - from: resources/runtime-host.exe
+    to: runtime-host.exe
+win:
+  target:
+    - nsis
+  artifactName: ${productName}-${version}-${arch}.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+# owner/repo are auto-detected from the git remote in CI.
+publish:
+  provider: github
+  releaseType: draft
