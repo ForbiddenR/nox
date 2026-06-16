@@ -354,8 +354,8 @@ fn start_run(ctx: &Context, id: Value, params: &Value) -> Response {
         None => return Response::error(id, INVALID_PARAMS, "missing required param: prompt"),
     };
 
-    // Start the run (spawns background task)
-    match run_service::start_run(thread_id, prompt, &ctx.db, ctx.notification_sender.clone()) {
+    // Start the run with mock runner for now (can switch to start_run_real later)
+    match run_service::start_run_mock(thread_id, prompt, &ctx.db, ctx.notification_sender.clone()) {
         Ok(run_id) => Response::success(id, json!({ "run_id": run_id })),
         Err(e) => Response::error(id, -32000, format!("failed to start run: {e}")),
     }
