@@ -8,6 +8,9 @@ const api = {
     ipcRenderer.on(channel, listener)
     return () => ipcRenderer.removeListener(channel, listener)
   },
+  dialog: {
+    openFolder: () => ipcRenderer.invoke('dialog:openFolder') as Promise<string | null>,
+  },
 }
 
 contextBridge.exposeInMainWorld('api', api)

@@ -40,6 +40,9 @@ declare global {
         method: string,
         callback: (params: unknown) => void,
       ) => () => void
+      dialog: {
+        openFolder: () => Promise<string | null>
+      }
     }
   }
 }

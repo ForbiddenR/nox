@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog } from 'electron'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import { Sidecar } from './sidecar'
@@ -105,4 +105,21 @@ ipcMain.handle('rpc', async (_event, method: string, params?: unknown) => {
     const e = err as { message?: string; code?: number; data?: unknown }
     return { ok: false, error: e.message ?? 'rpc error', code: e.code, data: e.data }
   }
+})
+
+// Native folder picker: returns the selected directory path or null if cancelled.
+ipcMain.handle('dialog:openFolder', async (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win) return null
+
+  const result = await dialog.showOpenDialog(win, {
+    properties: ['openDirectory', 'createDirectory'],
+    title: 'Open Project Folder',
+  })
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return null
+  }
+
+  return result.filePaths[0]
 })

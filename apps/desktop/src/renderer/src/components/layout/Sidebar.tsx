@@ -1,11 +1,13 @@
 import { useQuery } from '@tanstack/react-query'
 import { useProjectStore } from '../../store/project'
 import { useLayoutStore } from '../../store/layout'
+import { useOpenProject } from '../../features/projects/useOpenProject'
 import type { Project } from '../../lib/types'
 
 export default function Sidebar() {
   const { sidebarCollapsed, setSidebarCollapsed } = useLayoutStore()
   const { currentProject, setCurrentProject } = useProjectStore()
+  const openProject = useOpenProject()
 
   // Query recent projects
   const { data: projectsData } = useQuery({
@@ -20,10 +22,16 @@ export default function Sidebar() {
 
   const handleOpenProject = async () => {
     try {
-      // This will be wired up to native folder picker in Step 3
-      console.log('Open project clicked')
+      // Open native folder picker
+      const path = await window.api.dialog.openFolder()
+      if (!path) return // User cancelled
+
+      // Call open_project RPC
+      const project = await openProject.mutateAsync(path)
+      setCurrentProject(project)
     } catch (err) {
       console.error('Failed to open project:', err)
+      // TODO: Show error toast in Step 13 (UX polish)
     }
   }
 
@@ -63,9 +71,10 @@ export default function Sidebar() {
       <div className="border-b border-neutral-800 p-3">
         <button
           onClick={handleOpenProject}
-          className="w-full rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
+          disabled={openProject.isPending}
+          className="w-full rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          Open Project
+          {openProject.isPending ? 'Opening...' : 'Open Project'}
         </button>
       </div>
 
